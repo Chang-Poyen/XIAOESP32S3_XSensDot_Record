@@ -1,6 +1,6 @@
 // ===== all_in_one_merged.ino — XIAO ESP32S3 Sense: Camera + Mic (PDM) + IMU (ICM42688 SPI) =====
 // ===== 版本: v2.4-SPIIMU - ICM42688 改为 SPI，避开 I2S 干扰；WAV chunked 播放保持 =====
-
+// Original auther: AI-FanGe/OpenAIglasses_for_Navigation/tree/main/compile
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_camera.h>
@@ -16,14 +16,14 @@ struct WavFmt;
 using namespace websockets;
 
 // ===== WiFi / Server =====
-const char* WIFI_SSID   = "AndroidAP_1234";
-const char* WIFI_PASS   = "12345678";
-const char* SERVER_HOST = "192.168.233.63";
-const uint16_t SERVER_PORT = 9002;
-
+const char* WIFI_SSID   = "AndroidAP_1234"; // 此处填写Wi-Fi名称
+const char* WIFI_PASS   = "12345678"; //此处填写Wi-Fi密码
+const char* SERVER_HOST = "192.168.233.63"; //此处填写WebSocket服务器地址
+const uint16_t SERVER_PORT = 9002; //此处填写WebSocket服务器端口
+// 因为是双路录影,所以一个L,R烧录时请务必注意
 // static const char* CAM_WS_PATH = "/ws/cameraR";  //R for pink
 static const char* CAM_WS_PATH = "/ws/cameraL";   //L for Oranage
-static const char* AUD_WS_PATH = "/ws_audio";
+static const char* AUD_WS_PATH = "/ws_audio"; //audio用不到
 
 // ===== Camera config =====
 #define CAMERA_MODEL_XIAO_ESP32S3

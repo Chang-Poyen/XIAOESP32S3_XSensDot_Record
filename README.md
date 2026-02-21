@@ -85,3 +85,11 @@ ESP32上电---APP上启动WS---导入测试json---连接dot---开始录制---停
   检查对应ESP32烧录时的`CAM_WS_PATH`（L机用`/ws/cameraL`，R机用`/ws/cameraR`）
 - 已连接但无画面增长:
   看ESP32是否出现`[CAM-SEND] ERROR`或长时间`No frame sent`警告
+
+## License
+本项目采用 **Apache License 2.0** 开源许可证，详见 `LICENSE`。
+
+## Third-Party Notice
+- 本仓库的开源许可证仅适用于本项目自有代码。
+- Movella/Xsens SDK（如 `.aar`）属于第三方组件，需遵守其官方许可证与分发条款。
+- 如用于论文公开与代码复现，请在论文或附录中注明第三方组件来源与许可信息。

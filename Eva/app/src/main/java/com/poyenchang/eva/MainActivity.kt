@@ -677,10 +677,7 @@ fun MainScreen(modifier: Modifier = Modifier, activity: ComponentActivity) {
         if (uri == null || dir == null) return@rememberLauncherForActivityResult
         exportingZip = true
         scope.launch(Dispatchers.IO) {
-            val leftDir = java.io.File(dir, "L").absolutePath
-            val rightDir = java.io.File(dir, "R").absolutePath
-            val okL = exportMp4FromJpegs(leftDir, activity, "output_L.mp4")
-            val okR = exportMp4FromJpegs(rightDir, activity, "output_R.mp4")
+            val (okL, okR) = exportStereoMp4Synced(dir, activity)
             val zipOk = exportSessionToZip(activity, java.io.File(dir), uri)
             withContext(Dispatchers.Main) {
                 exportingZip = false
@@ -787,6 +784,9 @@ fun MainScreen(modifier: Modifier = Modifier, activity: ComponentActivity) {
                     recording = true
                     status = "錄製中… ${dir.absolutePath}"
                     dotController.startRecording(File(dir, "sensors"))
+                    wsServer.sendText("SET:FRAMESIZE=SVGA")
+                    wsServer.sendText("SET:QUALITY=12")
+                    wsServer.sendText("SET:FPS=15")
                     wsServer.sendText("START")
                     speechJob?.cancel()
                     if (speechSteps.isNotEmpty()) {
@@ -816,8 +816,7 @@ fun MainScreen(modifier: Modifier = Modifier, activity: ComponentActivity) {
                 if (dir != null) {
                     exporting = true
                     scope.launch(Dispatchers.IO) {
-                        val okL = exportMp4FromJpegs(java.io.File(dir, "L").absolutePath, activity, "output_L.mp4")
-                        val okR = exportMp4FromJpegs(java.io.File(dir, "R").absolutePath, activity, "output_R.mp4")
+                        val (okL, okR) = exportStereoMp4Synced(dir, activity)
                         exporting = false
                         status = "導出完成 L:${okL} R:${okR}"
                     }
@@ -866,7 +865,7 @@ private fun RowScope.StreamPreview(label: String, bmp: Bitmap?) {
 }
 
 // --------- MP4 導出 ---------
-private fun bitmapToI420(src: Bitmap): ByteArray {
+private fun bitmapToYuv420(src: Bitmap, colorFormat: Int): ByteArray {
     val width = if (src.width % 2 == 0) src.width else src.width - 1
     val height = if (src.height % 2 == 0) src.height else src.height - 1
     val argb = IntArray(width * height)
@@ -877,6 +876,7 @@ private fun bitmapToI420(src: Bitmap): ByteArray {
     var yIdx = 0
     var uIdx = ySize
     var vIdx = ySize + uvSize
+    var uvIdx = ySize
     for (j in 0 until height) {
         for (i in 0 until width) {
             val c = argb[j * width + i]
@@ -888,23 +888,72 @@ private fun bitmapToI420(src: Bitmap): ByteArray {
             val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
             yuv[yIdx++] = y.coerceIn(0, 255).toByte()
             if (j % 2 == 0 && i % 2 == 0) {
-                yuv[uIdx++] = u.coerceIn(0, 255).toByte()
-                yuv[vIdx++] = v.coerceIn(0, 255).toByte()
+                val uc = u.coerceIn(0, 255).toByte()
+                val vc = v.coerceIn(0, 255).toByte()
+                when (colorFormat) {
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar -> {
+                        yuv[uvIdx++] = uc
+                        yuv[uvIdx++] = vc
+                    }
+                    else -> {
+                        yuv[uIdx++] = uc
+                        yuv[vIdx++] = vc
+                    }
+                }
             }
         }
     }
     return yuv
 }
 
-private fun exportMp4FromJpegs(dirPath: String, ctx: ComponentActivity, fileName: String = "output.mp4", fps: Int = 15): Boolean {
+private data class TimelineRange(val startNs: Long, val endNs: Long)
+
+private fun listTimestampedJpegs(dirPath: String): List<Pair<Long, java.io.File>> {
+    val dir = java.io.File(dirPath)
+    return dir.listFiles { f -> f.extension.lowercase() in listOf("jpg", "jpeg") }
+        ?.mapNotNull { f ->
+            val ts = extractTimestampFromName(f.name) ?: return@mapNotNull null
+            ts to f
+        }
+        ?.sortedBy { it.first }
+        ?: emptyList()
+}
+
+private fun computeStereoOverlapTimeline(leftDirPath: String, rightDirPath: String): TimelineRange? {
+    val leftFrames = listTimestampedJpegs(leftDirPath)
+    val rightFrames = listTimestampedJpegs(rightDirPath)
+    if (leftFrames.isEmpty() || rightFrames.isEmpty()) return null
+
+    val overlapStart = maxOf(leftFrames.first().first, rightFrames.first().first)
+    val overlapEnd = minOf(leftFrames.last().first, rightFrames.last().first)
+    return if (overlapEnd >= overlapStart) TimelineRange(overlapStart, overlapEnd) else null
+}
+
+private fun exportStereoMp4Synced(sessionDir: String, ctx: ComponentActivity, fps: Int = 15): Pair<Boolean, Boolean> {
+    val leftDir = java.io.File(sessionDir, "L").absolutePath
+    val rightDir = java.io.File(sessionDir, "R").absolutePath
+    val timeline = computeStereoOverlapTimeline(leftDir, rightDir)
+    return if (timeline != null) {
+        val okL = exportMp4FromJpegs(leftDir, ctx, "output_L.mp4", fps, timeline)
+        val okR = exportMp4FromJpegs(rightDir, ctx, "output_R.mp4", fps, timeline)
+        okL to okR
+    } else {
+        val okL = exportMp4FromJpegs(leftDir, ctx, "output_L.mp4", fps)
+        val okR = exportMp4FromJpegs(rightDir, ctx, "output_R.mp4", fps)
+        okL to okR
+    }
+}
+
+private fun exportMp4FromJpegs(
+    dirPath: String,
+    ctx: ComponentActivity,
+    fileName: String = "output.mp4",
+    fps: Int = 15,
+    timeline: TimelineRange? = null,
+): Boolean {
     return runCatching {
         val dir = java.io.File(dirPath)
-        val frames = dir.listFiles { f -> f.extension.lowercase() in listOf("jpg", "jpeg") }
-            ?.mapNotNull { f ->
-                val ts = extractTimestampFromName(f.name) ?: return@mapNotNull null
-                ts to f
-            }
-            ?.sortedBy { it.first } ?: return false
+        val frames = listTimestampedJpegs(dirPath)
         if (frames.isEmpty()) return false
 
         val firstBmp = BitmapFactory.decodeFile(frames.first().second.absolutePath) ?: return false
@@ -922,13 +971,11 @@ private fun exportMp4FromJpegs(dirPath: String, ctx: ComponentActivity, fileName
         val codec = MediaCodec.createByCodecName(codecName)
         val caps = codec.codecInfo.getCapabilitiesForType("video/avc")
         val candidates = listOf(
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible,
             MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar,
             MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
         )
         val chosen = candidates.firstOrNull { caps.colorFormats.contains(it) }
-            ?: caps.colorFormats.firstOrNull()
-            ?: MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+            ?: return false
 
         val format = MediaFormat.createVideoFormat("video/avc", width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, chosen)
@@ -969,8 +1016,11 @@ private fun exportMp4FromJpegs(dirPath: String, ctx: ComponentActivity, fileName
             }
         }
 
-        val startNs = frames.first().first
-        val endNs = frames.last().first
+        val actualStartNs = frames.first().first
+        val actualEndNs = frames.last().first
+        val startNs = timeline?.startNs?.coerceIn(actualStartNs, actualEndNs) ?: actualStartNs
+        val endNs = timeline?.endNs?.coerceIn(actualStartNs, actualEndNs) ?: actualEndNs
+        if (endNs < startNs) return false
         var srcIdx = 0
         var currentYuv: ByteArray? = null
         var currentFile: java.io.File? = null
@@ -985,7 +1035,7 @@ private fun exportMp4FromJpegs(dirPath: String, ctx: ComponentActivity, fileName
             if (currentFile?.absolutePath != srcFile.absolutePath) {
                 val bmp = BitmapFactory.decodeFile(srcFile.absolutePath)
                 if (bmp != null) {
-                    currentYuv = bitmapToI420(bmp)
+                    currentYuv = bitmapToYuv420(bmp, chosen)
                     bmp.recycle()
                     currentFile = srcFile
                 }

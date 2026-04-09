@@ -18,7 +18,7 @@ using namespace websockets;
 // ===== WiFi / Server =====
 const char* WIFI_SSID   = "AndroidAP_1234"; // 此处填写Wi-Fi名称
 const char* WIFI_PASS   = "12345678"; //此处填写Wi-Fi密码
-const char* SERVER_HOST = "192.168.233.63"; //此处填写WebSocket服务器地址
+const char* SERVER_HOST = "192.168.150.167"; //此处填写WebSocket服务器地址
 const uint16_t SERVER_PORT = 9002; //此处填写WebSocket服务器端口
 // 因为是双路录影,所以一个L,R烧录时请务必注意
 // static const char* CAM_WS_PATH = "/ws/cameraR";  //R for pink
@@ -29,10 +29,10 @@ static const char* AUD_WS_PATH = "/ws_audio"; //audio用不到
 #define CAMERA_MODEL_XIAO_ESP32S3
 #include "camera_pins.h"
 
-framesize_t g_frame_size = FRAMESIZE_VGA;
-#define JPEG_QUALITY  17
+framesize_t g_frame_size = FRAMESIZE_SVGA;
+#define JPEG_QUALITY  12
 #define FB_COUNT      2
-volatile int g_target_fps = 0; // 新增：0=不限，>0 则按该FPS限速发送
+volatile int g_target_fps = 15; // 新增：0=不限，>0 则按该FPS限速发送
 
 // 【新增】视频传输性能监控
 volatile unsigned long frame_captured_count = 0;  // 采集帧计数
@@ -134,13 +134,14 @@ bool init_camera() {
 
     s->set_brightness(s, 0);
     s->set_contrast(s, 1);
-    s->set_saturation(s, 1);
+    s->set_saturation(s, 2);
+    s->set_special_effect(s, 0);  // 强制正常彩色效果
     s->set_gain_ctrl(s, 1);
-    s->set_exposure_ctrl(s, 0);
+    s->set_exposure_ctrl(s, 1);   // 开启自动曝光，避免低照度下近似灰度
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
-    s->set_aec2(s, 0);
-    s->set_aec_value(s, 40);
+    s->set_aec2(s, 1);
+    s->set_aec_value(s, 300);
   }
   return true;
 }
@@ -920,7 +921,9 @@ void setup() {
         String v = cmd.substring(strlen("SET:FRAMESIZE="));
         v.toUpperCase();
         framesize_t fs = g_frame_size;
-        if (v == "SVGA") fs = FRAMESIZE_SVGA;
+        if (v == "UXGA") fs = FRAMESIZE_UXGA;
+        else if (v == "SXGA") fs = FRAMESIZE_SXGA;
+        else if (v == "SVGA") fs = FRAMESIZE_SVGA;
         else if (v == "XGA") fs = FRAMESIZE_XGA;
         else if (v == "VGA") fs = FRAMESIZE_VGA;
         if (apply_framesize(fs)) Serial.printf("[CAM] framesize set to %s\n", v.c_str());

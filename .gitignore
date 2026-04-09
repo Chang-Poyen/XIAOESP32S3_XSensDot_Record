@@ -2,3 +2,7 @@
 .idea/
 .vscode/
 *.aar
+Eva/.kotlin/
+__pycache__/
+*.pyc
+recordings/
